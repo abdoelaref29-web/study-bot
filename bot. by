@@ -1,3 +1,4 @@
+ import os
 import json
 import random
 import requests
@@ -6,11 +7,11 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # =========================
-# KEYS
+# KEYS (من Railway)
 # =========================
-TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
-GEMINI_API_KEY = "PUT_YOUR_GEMINI_KEY"
-CHANNEL_USERNAME = "@your_channel"
+TOKEN = os.getenv("TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 
 DATA_FILE = "data.json"
 
@@ -33,7 +34,7 @@ data = load()
 def user(uid):
     uid = str(uid)
     if uid not in data:
-        data[uid] = {"score":0,"xp":0,"level":1,"tasks":[]}
+        data[uid] = {"score":0,"xp":0,"level":1}
     return data[uid]
 
 # =========================
@@ -50,14 +51,17 @@ async def check_sub(bot, user_id):
 # AI
 # =========================
 def ai_chat(prompt):
+    if not GEMINI_API_KEY:
+        return "❌ AI مش متفعل"
+
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents":[{"parts":[{"text":prompt}]}]}
-    res = requests.post(url, json=payload)
 
     try:
+        res = requests.post(url, json=payload)
         return res.json()["candidates"][0]["content"]["parts"][0]["text"]
     except:
-        return "❌ حصل خطأ"
+        return "❌ حصل خطأ في AI"
 
 # =========================
 # IMAGE
@@ -117,16 +121,13 @@ async def quiz(update, context):
     await q.answer()
 
     ques, options, ans = question()
-
     context.user_data["answer"] = ans
 
     keyboard = [
         [InlineKeyboardButton(f"A) {options['A']}", callback_data="A")],
         [InlineKeyboardButton(f"B) {options['B']}", callback_data="B")],
         [InlineKeyboardButton(f"C) {options['C']}", callback_data="C")],
-        [InlineKeyboardButton(f"D) {options['D']}", callback_data="D")],
-        [InlineKeyboardButton("✅ تمام", callback_data="done")],
-        [InlineKeyboardButton("❌ معملتهاش", callback_data="skip")]
+        [InlineKeyboardButton(f"D) {options['D']}", callback_data="D")]
     ]
 
     await q.message.reply_text(ques, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -143,7 +144,6 @@ async def buttons(update, context):
 
     data_btn = q.data
 
-    # إجابة
     if data_btn in ["A","B","C","D"]:
         correct = context.user_data.get("answer")
 
@@ -160,14 +160,6 @@ async def buttons(update, context):
             await q.message.reply_text(f"❌ غلط، الصح: {correct}")
 
         save(data)
-
-    elif data_btn == "done":
-        u["xp"] += 1
-        await q.message.reply_text("🔥 جامد كمل")
-        save(data)
-
-    elif data_btn == "skip":
-        await q.message.reply_text("😅 حاول تاني")
 
     elif data_btn == "quiz":
         await quiz(update, context)
@@ -197,45 +189,23 @@ async def check(update, context):
         )
         return
 
-    # نداء
     if "بوت" in text:
-        await update.message.reply_text(random.choice([
-            "نعم يا بطل 💪",
-            "أنا هنا 🔥",
-            "تحت أمرك 👌"
-        ]))
+        await update.message.reply_text("أنا معاك 💪")
         return
 
-    # شرح
     if "اشرح" in text:
         reply = ai_chat(text)
         await update.message.reply_text(reply)
         return
 
-    # صورة ملخص
     if "لخصلي" in text:
-        summary = ai_chat(f"لخص: {text}")
+        summary = ai_chat(text)
         img = generate_image(summary)
         await update.message.reply_text(img)
         return
 
-    # AI عام
     reply = ai_chat(text)
     await update.message.reply_text(reply)
-
-# =========================
-# REMINDER
-# =========================
-def reminder(app):
-    async def send():
-        for uid in data.keys():
-            try:
-                await app.bot.send_message(uid, "صلِّ على النبي ﷺ 🤍")
-            except:
-                pass
-    return send
-
-scheduler = BackgroundScheduler()
 
 # =========================
 # RUN
@@ -245,9 +215,6 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
-
-scheduler.add_job(reminder(app), "interval", minutes=10)
-scheduler.start()
 
 print("🔥 BOT RUNNING...")
 app.run_polling()
