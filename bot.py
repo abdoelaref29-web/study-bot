@@ -41,9 +41,13 @@ def user(uid):
 # =========================
 async def check_sub(bot, user_id):
     try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        chat = await bot.get_chat(CHANNEL_USERNAME)
+        member = await bot.get_chat_member(chat.id, user_id)
+
         return member.status in ["member", "administrator", "creator"]
-    except:
+
+    except Exception as e:
+        print("SUB CHECK ERROR:", e)
         return False
 
 # =========================
