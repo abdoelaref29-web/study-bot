@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -10,7 +9,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 # =========================
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 
 DATA_FILE = "data.json"
 
@@ -35,20 +33,6 @@ def user(uid):
     if uid not in data:
         data[uid] = {"score": 0, "xp": 0, "level": 1}
     return data[uid]
-
-# =========================
-# CHECK SUB
-# =========================
-async def check_sub(bot, user_id):
-    try:
-        chat = await bot.get_chat(CHANNEL_USERNAME)
-        member = await bot.get_chat_member(chat.id, user_id)
-
-        return member.status in ["member", "administrator", "creator"]
-
-    except Exception as e:
-        print("SUB CHECK ERROR:", e)
-        return False
 
 # =========================
 # AI
@@ -104,13 +88,6 @@ def menu():
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-
-    if not await check_sub(context.bot, uid):
-        await update.message.reply_text(
-            f"❌ اشترك في القناة:\nhttps://t.me/{CHANNEL_USERNAME.replace('@','')}"
-        )
-        return
-
     user(uid)
     save(data)
 
@@ -185,12 +162,6 @@ async def buttons(update, context):
 async def check(update, context):
     uid = update.effective_user.id
     text = update.message.text
-
-    if not await check_sub(context.bot, uid):
-        await update.message.reply_text(
-            f"❌ اشترك:\nhttps://t.me/{CHANNEL_USERNAME.replace('@','')}"
-        )
-        return
 
     if "بوت" in text:
         await update.message.reply_text("أنا معاك 💪")
