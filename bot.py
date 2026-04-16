@@ -3,11 +3,10 @@ import json
 import random
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from apscheduler.schedulers.background import BackgroundScheduler
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 # =========================
-# KEYS (من Railway)
+# KEYS
 # =========================
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -34,7 +33,7 @@ data = load()
 def user(uid):
     uid = str(uid)
     if uid not in data:
-        data[uid] = {"score":0,"xp":0,"level":1}
+        data[uid] = {"score": 0, "xp": 0, "level": 1}
     return data[uid]
 
 # =========================
@@ -43,7 +42,7 @@ def user(uid):
 async def check_sub(bot, user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status in ["member","administrator","creator"]
+        return member.status in ["member", "administrator", "creator"]
     except:
         return False
 
@@ -55,7 +54,7 @@ def ai_chat(prompt):
         return "❌ AI مش متفعل"
 
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents":[{"parts":[{"text":prompt}]}]}
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
     try:
         res = requests.post(url, json=payload)
@@ -100,7 +99,7 @@ def menu():
 # START
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
+    uid = update.effective_user.id
 
     if not await check_sub(context.bot, uid):
         await update.message.reply_text(
@@ -144,7 +143,7 @@ async def buttons(update, context):
 
     data_btn = q.data
 
-    if data_btn in ["A","B","C","D"]:
+    if data_btn in ["A", "B", "C", "D"]:
         correct = context.user_data.get("answer")
 
         if data_btn == correct:
@@ -180,7 +179,7 @@ async def buttons(update, context):
 # CHAT
 # =========================
 async def check(update, context):
-    uid = update.message.from_user.id
+    uid = update.effective_user.id
     text = update.message.text
 
     if not await check_sub(context.bot, uid):
