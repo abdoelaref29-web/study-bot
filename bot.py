@@ -35,20 +35,20 @@ def user(uid):
     return data[uid]
 
 # =========================
-# AI
+# AI (معدل)
 # =========================
 def ai_chat(prompt):
     if not GEMINI_API_KEY:
-        return "❌ AI مش متفعل"
+        return "❌ مفيش API KEY"
 
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
     try:
         res = requests.post(url, json=payload)
-        return res.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except:
-        return "❌ حصل خطأ في AI"
+        return res.text   # 👈 ده التعديل المهم
+    except Exception as e:
+        return f"❌ Error: {e}"
 
 # =========================
 # IMAGE
@@ -160,7 +160,6 @@ async def buttons(update, context):
 # CHAT
 # =========================
 async def check(update, context):
-    uid = update.effective_user.id
     text = update.message.text
 
     if "بوت" in text:
