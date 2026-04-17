@@ -35,24 +35,35 @@ def user(uid):
     return data[uid]
 
 # =========================
-# AI (النسخة النهائية)
+# AI (FINAL FIX)
 # =========================
 def ai_chat(prompt):
     if not GEMINI_API_KEY:
         return "❌ مفيش API KEY"
 
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
 
     try:
         res = requests.post(url, json=payload)
         data = res.json()
 
+        # لو فيه error من Google
         if "error" in data:
             return f"❌ AI Error:\n{data['error']['message']}"
 
+        # لو مفيش رد
         if "candidates" not in data:
-            return f"❌ AI Unexpected:\n{data}"
+            return f"❌ Unexpected Response:\n{data}"
 
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
