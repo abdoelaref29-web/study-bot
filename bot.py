@@ -35,20 +35,22 @@ def user(uid):
     return data[uid]
 
 # =========================
-# AI (معدل)
+# AI (معدل نهائي)
 # =========================
 def ai_chat(prompt):
     if not GEMINI_API_KEY:
         return "❌ مفيش API KEY"
 
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
     try:
         res = requests.post(url, json=payload)
-        return res.text   # 👈 ده التعديل المهم
+        data = res.json()
+
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
-        return f"❌ Error: {e}"
+        return f"❌ خطأ في AI: {e}"
 
 # =========================
 # IMAGE
