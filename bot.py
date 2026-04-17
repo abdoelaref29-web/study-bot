@@ -35,7 +35,7 @@ def user(uid):
     return data[uid]
 
 # =========================
-# AI (معدل نهائي)
+# AI (حل نهائي)
 # =========================
 def ai_chat(prompt):
     if not GEMINI_API_KEY:
@@ -48,7 +48,16 @@ def ai_chat(prompt):
         res = requests.post(url, json=payload)
         data = res.json()
 
+        # لو فيه error من Google
+        if "error" in data:
+            return f"❌ AI Error:\n{data['error']['message']}"
+
+        # لو مفيش candidates
+        if "candidates" not in data:
+            return f"❌ AI Unexpected Response:\n{data}"
+
         return data["candidates"][0]["content"]["parts"][0]["text"]
+
     except Exception as e:
         return f"❌ خطأ في AI: {e}"
 
