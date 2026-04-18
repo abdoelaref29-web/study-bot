@@ -2,17 +2,13 @@ import os
 import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# 🏆 Leaderboard (في الرام)
+leaderboard = {}
 
 # ================= AI =================
 def ai_chat(prompt):
@@ -25,34 +21,30 @@ def ai_chat(prompt):
     try:
         res = requests.post(url, json=payload)
         data = res.json()
+
+        if "error" in data:
+            return "⚠️ AI Error"
+
+        if "candidates" not in data:
+            return ""
+
         return data["candidates"][0]["content"]["parts"][0]["text"]
+
     except:
         return ""
 
-# ================= CLEAN JSON =================
-def clean_json(text):
-    text = text.strip()
-
-    if "```" in text:
-        text = text.split("```")[1]
-
-    start = text.find("[")
-    end = text.rfind("]") + 1
-    return text[start:end]
-
-# ================= QUIZ GENERATOR =================
-def generate_quiz(subject, num):
+# ================= QUIZ =================
+def generate_quiz(subject, chapter, num):
     prompt = f"""
-أنت مدرس خبير في مادة {subject} لطلاب الثانوية العامة (الصف الثالث الثانوي).
+أنت مدرس خبير في مادة {subject} للثانوية العامة.
 
-قم بإنشاء امتحان صعب جدًا مكون من {num} أسئلة اختيار من متعدد.
+اعمل امتحان صعب جدًا من {num} أسئلة من الباب {chapter}.
 
-الشروط:
-- أسئلة تحليلية وصعبة
-- أفكار ومسائل تحتاج تفكير
-- 4 اختيارات لكل سؤال
+- أسئلة تحليلية
+- 4 اختيارات
+- مستوى صعب
 
-رجع JSON فقط بدون أي كلام:
+رجع JSON فقط:
 
 [
   {{
@@ -63,52 +55,56 @@ def generate_quiz(subject, num):
   }}
 ]
 """
-
-    response = ai_chat(prompt)
+    res = ai_chat(prompt)
 
     try:
-        cleaned = clean_json(response)
-        return json.loads(cleaned)
+        start = res.find("[")
+        end = res.rfind("]") + 1
+        return json.loads(res[start:end])
     except:
-        print("AI RESPONSE:", response)
         return None
+
+# ================= LEVEL =================
+def get_level(score, total):
+    percent = (score / total) * 100
+
+    if percent >= 80:
+        return "🔥 ممتاز"
+    elif percent >= 50:
+        return "👍 متوسط"
+    else:
+        return "📚 محتاج مذاكرة"
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("""
 🔥 أهلاً بيك في البوت التعليمي
 
-الأوامر:
+🎯 اكتب:
+امتحان كيمياء باب 1 5
 
-🎯 /quiz كيمياء 5  → امتحان صعب
-🤖 /ai سؤال        → اسأل AI
-🖼️ /img شرح درس    → تلخيص
-
-جرب أي أمر 👌
+🤖 أو اسأل أي سؤال طبيعي
 """)
-
-# ================= AI COMMAND =================
-async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 اكتب سؤالك بعد /ai")
-
-# ================= IMG COMMAND =================
-async def img_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🖼️ اكتب: img لخصلي درس ...")
-
-# ================= QUIZ COMMAND =================
-async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎯 اكتب كده:\nquiz كيمياء 5")
 
 # ================= SEND QUESTION =================
 async def send_question(chat_id, context):
-    quiz = context.user_data.get("quiz")
-    index = context.user_data.get("index", 0)
+    quiz = context.user_data["quiz"]
+    index = context.user_data["index"]
 
     if index >= len(quiz):
-        score = context.user_data.get("score", 0)
+        score = context.user_data["score"]
+        total = len(quiz)
+
+        level = get_level(score, total)
+
+        user_id = chat_id
+        leaderboard[user_id] = leaderboard.get(user_id, 0) + score
+
         await context.bot.send_message(
             chat_id,
-            f"🏁 خلصت الامتحان\n\n✅ نتيجتك: {score}/{len(quiz)}"
+            f"🏁 خلصت الامتحان\n\n"
+            f"✅ النتيجة: {score}/{total}\n"
+            f"📊 المستوى: {level}"
         )
         return
 
@@ -127,53 +123,47 @@ async def send_question(chat_id, context):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# ================= ANSWER HANDLER =================
+# ================= ANSWER =================
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
     user_ans = q.data
-    quiz = context.user_data.get("quiz")
-    index = context.user_data.get("index", 0)
+    quiz = context.user_data["quiz"]
+    index = context.user_data["index"]
 
     question = quiz[index]
     correct = question["answer"]
-    explanation = question.get("explanation", "")
+    explanation = question["explanation"]
 
     if user_ans == correct:
         context.user_data["score"] += 1
-        await q.message.reply_text(
-            f"✅ صح 🎉\n"
-            f"📌 الإجابة: {correct}\n"
-            f"💡 {explanation}"
-        )
+        await q.message.reply_text(f"✅ صح\n💡 {explanation}")
     else:
-        await q.message.reply_text(
-            f"❌ غلط 😅\n"
-            f"📌 الصح: {correct}\n"
-            f"💡 {explanation}"
-        )
+        await q.message.reply_text(f"❌ غلط\n📌 الصح: {correct}\n💡 {explanation}")
 
     context.user_data["index"] += 1
     await send_question(q.message.chat_id, context)
 
-# ================= MESSAGE HANDLER =================
+# ================= HANDLER =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
-    # 🎯 QUIZ
-    if text.startswith("quiz"):
+    # 🎯 امتحان باب
+    if "امتحان" in text:
         try:
             parts = text.split()
+
             subject = parts[1]
-            num = int(parts[2])
+            chapter = parts[3]  # باب
+            num = int(parts[4])
 
             await update.message.reply_text("⏳ جاري تجهيز الامتحان...")
 
-            quiz = generate_quiz(subject, num)
+            quiz = generate_quiz(subject, chapter, num)
 
             if not quiz:
-                await update.message.reply_text("❌ حصل خطأ")
+                await update.message.reply_text("❌ خطأ في الامتحان")
                 return
 
             context.user_data["quiz"] = quiz
@@ -183,29 +173,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_question(update.message.chat_id, context)
 
         except:
-            await update.message.reply_text("❌ اكتب: quiz كيمياء 5")
-
-    # 🖼️ IMG
-    elif text.startswith("img"):
-        result = ai_chat(text)
-        await update.message.reply_text(result)
+            await update.message.reply_text("اكتب: امتحان كيمياء باب 1 5")
 
     # 🤖 AI
-    elif text.startswith("ai"):
-        result = ai_chat(text.replace("ai", ""))
+    else:
+        result = ai_chat(text)
         await update.message.reply_text(result if result else "❌ AI مش شغال")
 
-    else:
-        await update.message.reply_text("استخدم /quiz أو /ai أو /img")
-
-# ================= RUN BOT =================
+# ================= RUN =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("quiz", quiz_command))
-app.add_handler(CommandHandler("ai", ai_command))
-app.add_handler(CommandHandler("img", img_command))
-
 app.add_handler(CallbackQueryHandler(answer, pattern="^[A-D]$"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
