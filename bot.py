@@ -2,77 +2,59 @@ import os
 import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-DATA_FILE = "data.json"
-
-# ================= SAVE =================
-def load():
-    try:
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-users = load()
-
-def get_user(uid, name):
-    uid = str(uid)
-    if uid not in users:
-        users[uid] = {"name": name, "xp": 0, "level": 1, "score": 0}
-    return users[uid]
-
 # ================= AI =================
-def ai_text(prompt):
+def ai_chat(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    data = {"contents":[{"parts":[{"text":prompt}]}]}
+
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ]
+    }
 
     try:
-        res = requests.post(url, json=data).json()
-        return res["candidates"][0]["content"]["parts"][0]["text"]
-    except:
-        return "❌ AI Error"
+        res = requests.post(url, json=payload)
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print("AI ERROR:", e)
+        return ""
 
 # ================= IMAGE =================
-def ai_image(prompt):
+def generate_image(prompt):
     return f"https://image.pollinations.ai/prompt/{prompt}"
 
-# ================= EXAM =================
-def generate_exam(subject):
+# ================= QUIZ =================
+def generate_quiz(subject, num):
     prompt = f"""
-اعمل امتحان {subject} 10 اسئلة اختيار من متعدد.
-كل سؤال 4 اختيارات والإجابة الصحيحة.
-"""
+    اعمل امتحان {subject} مكون من {num} اسئلة اختيار من متعدد.
 
-    text = ai_text(prompt)
+    رجع JSON فقط بدون أي كلام:
 
-    questions = []
-    parts = text.split("سؤال")
+    [
+      {{
+        "q": "السؤال",
+        "options": ["A", "B", "C", "D"],
+        "answer": "A"
+      }}
+    ]
+    """
 
-    for p in parts[1:]:
-        lines = p.split("\n")
-        q = lines[0]
+    response = ai_chat(prompt)
 
-        opts = []
-        ans = ""
-
-        for l in lines:
-            if l.startswith(("A","B","C","D")):
-                opts.append(l)
-            if "الإجابة" in l:
-                ans = l.split(":")[-1].strip()
-
-        if len(opts) == 4:
-            questions.append((q, opts, ans))
-
-    return questions
+    try:
+        data = json.loads(response)
+        return data
+    except:
+        print("AI RESPONSE:", response)
+        return None
 
 # ================= MENU =================
 def menu():
@@ -80,113 +62,92 @@ def menu():
         [InlineKeyboardButton("🎯 امتحان", callback_data="exam")],
         [InlineKeyboardButton("🤖 AI", callback_data="ai")],
         [InlineKeyboardButton("🖼️ صورة", callback_data="img")],
-        [InlineKeyboardButton("🏆 الترتيب", callback_data="top")]
     ])
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔥 اختار:", reply_markup=menu())
+    await update.message.reply_text("🔥 اختار اللي عايزه", reply_markup=menu())
 
 # ================= BUTTONS =================
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(update, context):
     q = update.callback_query
     await q.answer()
 
-    uid = str(q.from_user.id)
-    user = get_user(uid, q.from_user.first_name)
-
     if q.data == "exam":
-        await q.message.reply_text("اكتب: امتحان + المادة")
+        await q.message.reply_text("اكتب مثلا: عايز امتحان كيميا 10 سؤال")
 
     elif q.data == "ai":
-        await q.message.reply_text("اسأل 🤖")
+        await q.message.reply_text("اسأل أي حاجة 🤖")
 
     elif q.data == "img":
-        await q.message.reply_text("اكتب: لخصلي + الدرس")
+        await q.message.reply_text("اكتب: لخصلي درس ...")
 
-    elif q.data == "top":
-        top = sorted(users.values(), key=lambda x: x["xp"], reverse=True)[:5]
+# ================= SEND QUESTION =================
+async def send_question(update, context):
+    quiz = context.user_data.get("quiz")
+    index = context.user_data.get("index", 0)
 
-        text = "🏆 الأفضل:\n"
-        for i, u in enumerate(top):
-            text += f"{i+1}- {u['name']} | XP: {u['xp']}\n"
+    if not quiz or index >= len(quiz):
+        await update.message.reply_text("✅ خلصت الامتحان")
+        return
 
-        await q.message.reply_text(text)
+    q = quiz[index]
 
-    elif q.data.startswith("ans_"):
-        ans = q.data.split("_")[1]
+    text = f"{q['q']}\n\n"
+    for i, opt in enumerate(q["options"]):
+        text += f"{chr(65+i)}) {opt}\n"
 
-        if ans == context.user_data["answer"]:
-            user["xp"] += 2
-            await q.message.reply_text("✅ صح")
-        else:
-            await q.message.reply_text(f"❌ غلط\nالصح: {context.user_data['answer']}")
+    await update.message.reply_text(text)
 
-        context.user_data["q"] += 1
-
-        if context.user_data["q"] < len(context.user_data["exam"]):
-            await send_q(q, context)
-        else:
-            user["level"] += 1
-            await q.message.reply_text("🎉 خلصت الامتحان!")
-
-        save(users)
-
-# ================= SEND Q =================
-async def send_q(q, context):
-    i = context.user_data["q"]
-    exam = context.user_data["exam"]
-
-    ques, opts, ans = exam[i]
-    context.user_data["answer"] = ans
-
-    kb = []
-    for o in opts:
-        kb.append([InlineKeyboardButton(o, callback_data=f"ans_{o[0]}")])
-
-    await q.message.reply_text(f"سؤال {i+1}:\n{ques}", reply_markup=InlineKeyboardMarkup(kb))
-
-# ================= CHAT =================
-async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ================= HANDLE MESSAGE =================
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    uid = str(update.message.from_user.id)
-    user = get_user(uid, update.message.from_user.first_name)
 
-    # امتحان
+    # 🎯 امتحان
     if "امتحان" in text:
-        subject = text.replace("امتحان","").strip()
+        try:
+            parts = text.split()
+            subject = parts[2]
+            num = int(parts[3])
 
-        await update.message.reply_text("⏳ جاري التحميل...")
+            await update.message.reply_text("⏳ جاري التحميل...")
 
-        exam = generate_exam(subject)
+            quiz = generate_quiz(subject, num)
 
-        if not exam:
-            await update.message.reply_text("❌ فشل الامتحان")
-            return
+            if not quiz:
+                await update.message.reply_text("❌ فشل الامتحان")
+                return
 
-        context.user_data["exam"] = exam
-        context.user_data["q"] = 0
+            context.user_data["quiz"] = quiz
+            context.user_data["index"] = 0
 
-        await send_q(update, context)
-        return
+            await send_question(update, context)
 
-    # صورة
-    if "لخصلي" in text:
-        summary = ai_text(text)
-        img = ai_image(summary)
-        await update.message.reply_photo(img, caption="🖼️ ملخص")
-        return
+        except:
+            await update.message.reply_text("❌ اكتب صح: عايز امتحان كيميا 10 سؤال")
 
-    # AI
-    reply = ai_text(text)
-    await update.message.reply_text(reply)
+    # ▶️ التالي
+    elif "التالي" in text:
+        context.user_data["index"] += 1
+        await send_question(update, context)
+
+    # 🖼️ صورة
+    elif "لخصلي" in text:
+        summary = ai_chat(text)
+        img = generate_image(summary)
+        await update.message.reply_text(img)
+
+    # 🤖 AI
+    else:
+        reply = ai_chat(text)
+        await update.message.reply_text(reply if reply else "❌ AI مش شغال")
 
 # ================= RUN =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
 print("🔥 BOT RUNNING...")
 app.run_polling()
