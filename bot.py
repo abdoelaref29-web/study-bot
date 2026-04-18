@@ -2,7 +2,14 @@ import os
 import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -33,20 +40,29 @@ def clean_json(text):
     end = text.rfind("]") + 1
     return text[start:end]
 
-# ================= QUIZ =================
+# ================= QUIZ GENERATOR =================
 def generate_quiz(subject, num):
     prompt = f"""
-    اعمل امتحان {subject} مكون من {num} اسئلة اختيار من متعدد.
+أنت مدرس خبير في مادة {subject} لطلاب الثانوية العامة (الصف الثالث الثانوي).
 
-    رجع JSON فقط بالشكل ده:
-    [
-      {{
-        "q": "السؤال",
-        "options": ["A", "B", "C", "D"],
-        "answer": "A"
-      }}
-    ]
-    """
+قم بإنشاء امتحان صعب جدًا مكون من {num} أسئلة اختيار من متعدد.
+
+الشروط:
+- أسئلة تحليلية وصعبة
+- أفكار ومسائل تحتاج تفكير
+- 4 اختيارات لكل سؤال
+
+رجع JSON فقط بدون أي كلام:
+
+[
+  {{
+    "q": "السؤال",
+    "options": ["A", "B", "C", "D"],
+    "answer": "A",
+    "explanation": "شرح الإجابة"
+  }}
+]
+"""
 
     response = ai_chat(prompt)
 
@@ -57,17 +73,31 @@ def generate_quiz(subject, num):
         print("AI RESPONSE:", response)
         return None
 
-# ================= MENU =================
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎯 امتحان", callback_data="exam")],
-        [InlineKeyboardButton("🤖 AI", callback_data="ai")],
-        [InlineKeyboardButton("🖼️ صورة", callback_data="img")]
-    ])
-
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔥 اختار:", reply_markup=menu())
+    await update.message.reply_text("""
+🔥 أهلاً بيك في البوت التعليمي
+
+الأوامر:
+
+🎯 /quiz كيمياء 5  → امتحان صعب
+🤖 /ai سؤال        → اسأل AI
+🖼️ /img شرح درس    → تلخيص
+
+جرب أي أمر 👌
+""")
+
+# ================= AI COMMAND =================
+async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🤖 اكتب سؤالك بعد /ai")
+
+# ================= IMG COMMAND =================
+async def img_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🖼️ اكتب: img لخصلي درس ...")
+
+# ================= QUIZ COMMAND =================
+async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🎯 اكتب كده:\nquiz كيمياء 5")
 
 # ================= SEND QUESTION =================
 async def send_question(chat_id, context):
@@ -76,7 +106,10 @@ async def send_question(chat_id, context):
 
     if index >= len(quiz):
         score = context.user_data.get("score", 0)
-        await context.bot.send_message(chat_id, f"🏁 خلصت الامتحان\n✅ نتيجتك: {score}/{len(quiz)}")
+        await context.bot.send_message(
+            chat_id,
+            f"🏁 خلصت الامتحان\n\n✅ نتيجتك: {score}/{len(quiz)}"
+        )
         return
 
     q = quiz[index]
@@ -94,8 +127,8 @@ async def send_question(chat_id, context):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# ================= HANDLE ANSWER =================
-async def answer(update, context):
+# ================= ANSWER HANDLER =================
+async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
@@ -103,48 +136,44 @@ async def answer(update, context):
     quiz = context.user_data.get("quiz")
     index = context.user_data.get("index", 0)
 
-    correct = quiz[index]["answer"]
+    question = quiz[index]
+    correct = question["answer"]
+    explanation = question.get("explanation", "")
 
     if user_ans == correct:
         context.user_data["score"] += 1
-        await q.message.reply_text("✅ صح")
+        await q.message.reply_text(
+            f"✅ صح 🎉\n"
+            f"📌 الإجابة: {correct}\n"
+            f"💡 {explanation}"
+        )
     else:
-        await q.message.reply_text(f"❌ غلط - الصح: {correct}")
+        await q.message.reply_text(
+            f"❌ غلط 😅\n"
+            f"📌 الصح: {correct}\n"
+            f"💡 {explanation}"
+        )
 
     context.user_data["index"] += 1
     await send_question(q.message.chat_id, context)
 
-# ================= BUTTONS =================
-async def buttons(update, context):
-    q = update.callback_query
-    await q.answer()
-
-    if q.data == "exam":
-        await q.message.reply_text("اكتب: عايز امتحان كيميا 5")
-
-    elif q.data == "ai":
-        await q.message.reply_text("اسأل أي حاجة 🤖")
-
-    elif q.data == "img":
-        await q.message.reply_text("اكتب: لخصلي درس ...")
-
-# ================= HANDLE MESSAGE =================
+# ================= MESSAGE HANDLER =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
-    # 🎯 امتحان
-    if "امتحان" in text:
+    # 🎯 QUIZ
+    if text.startswith("quiz"):
         try:
             parts = text.split()
-            subject = parts[2]
-            num = int(parts[3])
+            subject = parts[1]
+            num = int(parts[2])
 
-            await update.message.reply_text("⏳ جاري التحميل...")
+            await update.message.reply_text("⏳ جاري تجهيز الامتحان...")
 
             quiz = generate_quiz(subject, num)
 
             if not quiz:
-                await update.message.reply_text("❌ فشل الامتحان")
+                await update.message.reply_text("❌ حصل خطأ")
                 return
 
             context.user_data["quiz"] = quiz
@@ -154,25 +183,30 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_question(update.message.chat_id, context)
 
         except:
-            await update.message.reply_text("❌ اكتب صح: عايز امتحان كيميا 5")
+            await update.message.reply_text("❌ اكتب: quiz كيمياء 5")
 
-    # 🖼️ صورة
-    elif "لخصلي" in text:
-        summary = ai_chat(text)
-        img = f"https://image.pollinations.ai/prompt/{summary}"
-        await update.message.reply_text(img)
+    # 🖼️ IMG
+    elif text.startswith("img"):
+        result = ai_chat(text)
+        await update.message.reply_text(result)
 
     # 🤖 AI
-    else:
-        reply = ai_chat(text)
-        await update.message.reply_text(reply if reply else "❌ AI مش شغال")
+    elif text.startswith("ai"):
+        result = ai_chat(text.replace("ai", ""))
+        await update.message.reply_text(result if result else "❌ AI مش شغال")
 
-# ================= RUN =================
+    else:
+        await update.message.reply_text("استخدم /quiz أو /ai أو /img")
+
+# ================= RUN BOT =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("quiz", quiz_command))
+app.add_handler(CommandHandler("ai", ai_command))
+app.add_handler(CommandHandler("img", img_command))
+
 app.add_handler(CallbackQueryHandler(answer, pattern="^[A-D]$"))
-app.add_handler(CallbackQueryHandler(buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
 print("🔥 BOT RUNNING...")
