@@ -2,27 +2,14 @@ import os
 import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
-# =========================
-# ENV VARIABLES
-# =========================
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 
 DATA_FILE = "data.json"
 
-# =========================
-# DATA
-# =========================
+# ================= SAVE =================
 def load():
     try:
         with open(DATA_FILE, "r") as f:
@@ -34,157 +21,167 @@ def save(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-data = load()
+users = load()
 
-def user(uid):
+def get_user(uid, name):
     uid = str(uid)
-    if uid not in data:
-        data[uid] = {"score": 0, "xp": 0, "level": 1}
-    return data[uid]
+    if uid not in users:
+        users[uid] = {"name": name, "xp": 0, "level": 1, "score": 0}
+    return users[uid]
 
-# =========================
-# AI (FIXED GEMINI)
-# =========================
-def ai_chat(prompt):
-    if not GEMINI_API_KEY:
-        return "❌ AI مش متفعل"
-
+# ================= AI =================
+def ai_text(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ]
-    }
+    data = {"contents":[{"parts":[{"text":prompt}]}]}
 
     try:
-        res = requests.post(url, json=payload)
-        data = res.json()
+        res = requests.post(url, json=data).json()
+        return res["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return "❌ AI Error"
 
-        if "candidates" not in data:
-            return f"❌ AI Error: {data}"
-
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-
-    except Exception as e:
-        return f"❌ AI Error: {str(e)}"
-
-# =========================
-# IMAGE
-# =========================
-def generate_image(prompt):
+# ================= IMAGE =================
+def ai_image(prompt):
     return f"https://image.pollinations.ai/prompt/{prompt}"
 
-# =========================
-# SUB CHECK (مبسط)
-# =========================
-async def check_sub(bot, user_id):
-    try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except:
-        return True  # لو حصل مشكلة نخليها تمر
+# ================= EXAM =================
+def generate_exam(subject):
+    prompt = f"""
+اعمل امتحان {subject} 10 اسئلة اختيار من متعدد.
+كل سؤال 4 اختيارات والإجابة الصحيحة.
+"""
 
-# =========================
-# MENU
-# =========================
+    text = ai_text(prompt)
+
+    questions = []
+    parts = text.split("سؤال")
+
+    for p in parts[1:]:
+        lines = p.split("\n")
+        q = lines[0]
+
+        opts = []
+        ans = ""
+
+        for l in lines:
+            if l.startswith(("A","B","C","D")):
+                opts.append(l)
+            if "الإجابة" in l:
+                ans = l.split(":")[-1].strip()
+
+        if len(opts) == 4:
+            questions.append((q, opts, ans))
+
+    return questions
+
+# ================= MENU =================
 def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📚 كويز", callback_data="quiz")],
-        [InlineKeyboardButton("🤖 اسأل AI", callback_data="ask")],
-        [InlineKeyboardButton("🏆 نتيجتي", callback_data="score")]
+        [InlineKeyboardButton("🎯 امتحان", callback_data="exam")],
+        [InlineKeyboardButton("🤖 AI", callback_data="ai")],
+        [InlineKeyboardButton("🖼️ صورة", callback_data="img")],
+        [InlineKeyboardButton("🏆 الترتيب", callback_data="top")]
     ])
 
-# =========================
-# START
-# =========================
+# ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
+    await update.message.reply_text("🔥 اختار:", reply_markup=menu())
 
-    user(uid)
-    save(data)
-
-    await update.message.reply_text("🔥 أهلاً بيك", reply_markup=menu())
-
-# =========================
-# QUIZ (بسيط)
-# =========================
-def question():
-    return (
-        "ما وظيفة الميتوكوندريا؟",
-        {"A": "تخزين الماء", "B": "إنتاج الطاقة", "C": "الحماية", "D": "النقل"},
-        "B"
-    )
-
-async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    ques, options, ans = question()
-    context.user_data["answer"] = ans
-
-    keyboard = [
-        [InlineKeyboardButton(f"A) {options['A']}", callback_data="A")],
-        [InlineKeyboardButton(f"B) {options['B']}", callback_data="B")],
-        [InlineKeyboardButton(f"C) {options['C']}", callback_data="C")],
-        [InlineKeyboardButton(f"D) {options['D']}", callback_data="D")]
-    ]
-
-    await q.message.reply_text(ques, reply_markup=InlineKeyboardMarkup(keyboard))
-
-# =========================
-# BUTTONS
-# =========================
+# ================= BUTTONS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
     uid = str(q.from_user.id)
-    u = user(uid)
+    user = get_user(uid, q.from_user.first_name)
 
-    if q.data in ["A", "B", "C", "D"]:
-        correct = context.user_data.get("answer")
+    if q.data == "exam":
+        await q.message.reply_text("اكتب: امتحان + المادة")
 
-        if q.data == correct:
-            u["score"] += 1
-            u["xp"] += 1
-            await q.message.reply_text("✅ صح يا بطل")
+    elif q.data == "ai":
+        await q.message.reply_text("اسأل 🤖")
+
+    elif q.data == "img":
+        await q.message.reply_text("اكتب: لخصلي + الدرس")
+
+    elif q.data == "top":
+        top = sorted(users.values(), key=lambda x: x["xp"], reverse=True)[:5]
+
+        text = "🏆 الأفضل:\n"
+        for i, u in enumerate(top):
+            text += f"{i+1}- {u['name']} | XP: {u['xp']}\n"
+
+        await q.message.reply_text(text)
+
+    elif q.data.startswith("ans_"):
+        ans = q.data.split("_")[1]
+
+        if ans == context.user_data["answer"]:
+            user["xp"] += 2
+            await q.message.reply_text("✅ صح")
         else:
-            await q.message.reply_text(f"❌ غلط، الصح: {correct}")
+            await q.message.reply_text(f"❌ غلط\nالصح: {context.user_data['answer']}")
 
-        save(data)
+        context.user_data["q"] += 1
 
-    elif q.data == "quiz":
-        await quiz(update, context)
+        if context.user_data["q"] < len(context.user_data["exam"]):
+            await send_q(q, context)
+        else:
+            user["level"] += 1
+            await q.message.reply_text("🎉 خلصت الامتحان!")
 
-    elif q.data == "ask":
-        await q.message.reply_text("اكتب سؤالك 🤖")
+        save(users)
 
-    elif q.data == "score":
-        await q.message.reply_text(f"🏆 Score: {u['score']} | ⭐ Level: {u['level']}")
+# ================= SEND Q =================
+async def send_q(q, context):
+    i = context.user_data["q"]
+    exam = context.user_data["exam"]
 
-# =========================
-# CHAT HANDLER
-# =========================
+    ques, opts, ans = exam[i]
+    context.user_data["answer"] = ans
+
+    kb = []
+    for o in opts:
+        kb.append([InlineKeyboardButton(o, callback_data=f"ans_{o[0]}")])
+
+    await q.message.reply_text(f"سؤال {i+1}:\n{ques}", reply_markup=InlineKeyboardMarkup(kb))
+
+# ================= CHAT =================
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
     text = update.message.text
+    uid = str(update.message.from_user.id)
+    user = get_user(uid, update.message.from_user.first_name)
 
-    if "اشرح" in text or "لخص" in text:
-        reply = ai_chat(text)
-        await update.message.reply_text(reply)
+    # امتحان
+    if "امتحان" in text:
+        subject = text.replace("امتحان","").strip()
+
+        await update.message.reply_text("⏳ جاري التحميل...")
+
+        exam = generate_exam(subject)
+
+        if not exam:
+            await update.message.reply_text("❌ فشل الامتحان")
+            return
+
+        context.user_data["exam"] = exam
+        context.user_data["q"] = 0
+
+        await send_q(update, context)
         return
 
-    reply = ai_chat(text)
+    # صورة
+    if "لخصلي" in text:
+        summary = ai_text(text)
+        img = ai_image(summary)
+        await update.message.reply_photo(img, caption="🖼️ ملخص")
+        return
+
+    # AI
+    reply = ai_text(text)
     await update.message.reply_text(reply)
 
-# =========================
-# RUN BOT
-# =========================
+# ================= RUN =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
