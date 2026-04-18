@@ -2,13 +2,21 @@ import os
 import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 
 # =========================
-# KEYS
+# ENV VARIABLES
 # =========================
 TOKEN = os.getenv("TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 
 DATA_FILE = "data.json"
 
@@ -35,13 +43,13 @@ def user(uid):
     return data[uid]
 
 # =========================
-# AI (FINAL FIX)
+# AI (FIXED GEMINI)
 # =========================
 def ai_chat(prompt):
     if not GEMINI_API_KEY:
-        return "❌ مفيش API KEY"
+        return "❌ AI مش متفعل"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     payload = {
         "contents": [
@@ -57,18 +65,13 @@ def ai_chat(prompt):
         res = requests.post(url, json=payload)
         data = res.json()
 
-        # لو فيه error من Google
-        if "error" in data:
-            return f"❌ AI Error:\n{data['error']['message']}"
-
-        # لو مفيش رد
         if "candidates" not in data:
-            return f"❌ Unexpected Response:\n{data}"
+            return f"❌ AI Error: {data}"
 
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
     except Exception as e:
-        return f"❌ خطأ في AI: {e}"
+        return f"❌ AI Error: {str(e)}"
 
 # =========================
 # IMAGE
@@ -77,19 +80,14 @@ def generate_image(prompt):
     return f"https://image.pollinations.ai/prompt/{prompt}"
 
 # =========================
-# QUESTION
+# SUB CHECK (مبسط)
 # =========================
-def question():
-    return (
-        "ما وظيفة الميتوكوندريا؟",
-        {
-            "A": "تخزين الماء",
-            "B": "إنتاج الطاقة",
-            "C": "الحماية",
-            "D": "النقل"
-        },
-        "B"
-    )
+async def check_sub(bot, user_id):
+    try:
+        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except:
+        return True  # لو حصل مشكلة نخليها تمر
 
 # =========================
 # MENU
@@ -98,8 +96,6 @@ def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📚 كويز", callback_data="quiz")],
         [InlineKeyboardButton("🤖 اسأل AI", callback_data="ask")],
-        [InlineKeyboardButton("📖 شرح درس", callback_data="lesson")],
-        [InlineKeyboardButton("🖼️ لخص في صورة", callback_data="imgsum")],
         [InlineKeyboardButton("🏆 نتيجتي", callback_data="score")]
     ])
 
@@ -107,16 +103,24 @@ def menu():
 # START
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
+    uid = update.message.from_user.id
+
     user(uid)
     save(data)
 
-    await update.message.reply_text("🔥 أهلاً بيك يا بطل", reply_markup=menu())
+    await update.message.reply_text("🔥 أهلاً بيك", reply_markup=menu())
 
 # =========================
-# QUIZ
+# QUIZ (بسيط)
 # =========================
-async def quiz(update, context):
+def question():
+    return (
+        "ما وظيفة الميتوكوندريا؟",
+        {"A": "تخزين الماء", "B": "إنتاج الطاقة", "C": "الحماية", "D": "النقل"},
+        "B"
+    )
+
+async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
@@ -135,79 +139,57 @@ async def quiz(update, context):
 # =========================
 # BUTTONS
 # =========================
-async def buttons(update, context):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
     uid = str(q.from_user.id)
     u = user(uid)
 
-    data_btn = q.data
-
-    if data_btn in ["A", "B", "C", "D"]:
+    if q.data in ["A", "B", "C", "D"]:
         correct = context.user_data.get("answer")
 
-        if data_btn == correct:
+        if q.data == correct:
             u["score"] += 1
             u["xp"] += 1
-
-            if u["xp"] % 5 == 0:
-                u["level"] += 1
-                await q.message.reply_text("🔥 Level Up!")
-
-            await q.message.reply_text("✅ صح يا وحش")
+            await q.message.reply_text("✅ صح يا بطل")
         else:
             await q.message.reply_text(f"❌ غلط، الصح: {correct}")
 
         save(data)
 
-    elif data_btn == "quiz":
+    elif q.data == "quiz":
         await quiz(update, context)
 
-    elif data_btn == "lesson":
-        await q.message.reply_text("اكتب: اشرح + اسم الدرس")
+    elif q.data == "ask":
+        await q.message.reply_text("اكتب سؤالك 🤖")
 
-    elif data_btn == "ask":
-        await q.message.reply_text("اسأل أي حاجة 🤖")
-
-    elif data_btn == "imgsum":
-        await q.message.reply_text("اكتب: لخصلي درس ...")
-
-    elif data_btn == "score":
+    elif q.data == "score":
         await q.message.reply_text(f"🏆 Score: {u['score']} | ⭐ Level: {u['level']}")
 
 # =========================
-# CHAT
+# CHAT HANDLER
 # =========================
-async def check(update, context):
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.message.from_user.id
     text = update.message.text
 
-    if "بوت" in text:
-        await update.message.reply_text("أنا معاك 💪")
-        return
-
-    if "اشرح" in text:
+    if "اشرح" in text or "لخص" in text:
         reply = ai_chat(text)
         await update.message.reply_text(reply)
-        return
-
-    if "لخصلي" in text:
-        summary = ai_chat(text)
-        img = generate_image(summary)
-        await update.message.reply_text(img)
         return
 
     reply = ai_chat(text)
     await update.message.reply_text(reply)
 
 # =========================
-# RUN
+# RUN BOT
 # =========================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
 print("🔥 BOT RUNNING...")
 app.run_polling()
